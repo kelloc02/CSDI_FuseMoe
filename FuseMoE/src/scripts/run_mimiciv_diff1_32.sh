@@ -1,0 +1,34 @@
+export CUDA_VISIBLE_DEVICES=0
+
+python -W ignore main_mimiciv_diff.py  --num_train_epochs 32  --modeltype 'TS_Text' \
+                --kernel_size 1 --train_batch_size 2 --eval_batch_size 8 --seed 42 \
+                --gradient_accumulation_steps 16  --num_update_bert_epochs 2 --bertcount 0 \
+                --ts_learning_rate 0.0004 --txt_learning_rate 0.00002 \
+                --notes_order 'Last' --num_of_notes 5 --max_length 1024 --layers 3\
+                --output_dir "../run/diff116" \
+                --embed_dim 128 \
+                --num_modalities 2 \
+                --model_name "bioLongformer"\
+                --task 'ihm-48-cxr-notes-ecg-missingInd'\
+                --file_path '/playpen-shared/kechengli/workspace/dataset/mimiciv_after_diff_fuse_2'\
+                --num_labels 2 \
+                --num_heads 8\
+                --embed_time 64\
+                --tt_max 48\
+                --TS_mixup\
+                --mixup_level 'batch'\
+                --fp16 \
+                --irregular_learn_emb_text \
+                --irregular_learn_emb_ts \
+                --cross_method "moe" \
+                --gating_function "laplace" \
+                --num_of_experts 16 \
+                --top_k 2 \
+                --disjoint_top_k 2 \
+                --hidden_size 512 \
+                --use_pt_text_embeddings \
+                --router_type 'joint' \
+                --reg_ts \
+                --tensorboard_dir "../run/tensorboard116" \
+                --use_balance_loss \
+                --balance_loss_coef 0.01
