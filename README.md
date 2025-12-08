@@ -1,11 +1,11 @@
 # CSDI_FuseMoe
 
-## 1. 环境安装
+## 1. FuseMoe环境安装
 
 进入 `fusemoe` 文件夹后，按照其中的 `README` 步骤配置 Python 环境并安装依赖。
 
 
-## 2. bash 运行脚本
+## 2. FuseMoe bash 运行脚本
 跑mimiciv数据集的时候bash运行src/scripts/run_mimiciv_1.sh这个脚本
 ```bash
 bash run_mimiciv.sh 
