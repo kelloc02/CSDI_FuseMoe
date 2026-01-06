@@ -146,7 +146,9 @@ class TSNote_Irg(Dataset):
         reg_ts=data_detail['reg_ts']
         reg_ts_mask = data_detail['reg_ts_mask']
         ## ts=data_detail['irg_ts']
-        # 改成imputed后再进行mtand
+
+        #          @@@@@@@
+        # 改成imputed后再进行mtand @@@@@@@
         ts = data_detail.get('irg_ts_imputed', data_detail['irg_ts'])
 
         ts_mask=data_detail['irg_ts_mask']
