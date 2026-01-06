@@ -14,7 +14,7 @@ from config_mm import get_config
 from dataset_mm import MultiModalImputationDataset, collate_mm
 from csdi_mm_moe import CSDI_MultiModal_MoE
 
-## 命令行：python train_mm_csdi.py   --data /playpen-shared/kechengli/workspace/dataset/mimiciv_pkl/train_ihm-48-cxr-notes-ecg-missingInd_stays.pkl   --epochs 50   --batch_size 16   --gpu 0
+
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -46,17 +46,19 @@ def load_samples(path: str):
 
 
 @torch.no_grad()
-def eval_one_epoch(model, loader, device, n_samples=20, desc="val"):
+def eval_one_epoch(model, loader, device, n_samples=2, desc="val"):
+    """
+    注意：diffusion sampling 很慢。训练期间建议 n_samples 小（2/4），并且不每个 epoch 都评估。
+    """
     model.eval()
     total_mse = 0.0
     total_cnt = 0.0
 
-    pbar = tqdm(loader, desc=f"[{desc}] sampling", leave=False)
+    pbar = tqdm(loader, desc=f"[{desc}] sampling (n_samples={n_samples})", leave=False)
     for batch in pbar:
         samples, observed_data, target_mask, observed_mask, tp, moe_w = model.evaluate(
             batch, n_samples=n_samples
         )
-
         pred = samples.median(dim=1).values  # (B,K,L)
 
         err = (pred - observed_data) ** 2
@@ -77,39 +79,42 @@ def save_curves(out_dir, train_loss_step, train_loss_epoch, val_rmse_epoch, moe_
     os.makedirs(out_dir, exist_ok=True)
 
     # 1) step-level training loss
-    plt.figure()
-    plt.plot(train_loss_step, linewidth=1)
-    plt.xlabel("Training step")
-    plt.ylabel("Loss")
-    plt.title("Training Loss (step-level)")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "train_loss_step.png"))
-    plt.close()
+    if len(train_loss_step) > 0:
+        plt.figure()
+        plt.plot(train_loss_step, linewidth=1)
+        plt.xlabel("Training step")
+        plt.ylabel("Loss")
+        plt.title("Training Loss (step-level)")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "train_loss_step.png"))
+        plt.close()
 
     # 2) epoch-level training loss
-    plt.figure()
-    plt.plot(train_loss_epoch, marker="o")
-    plt.xlabel("Epoch")
-    plt.ylabel("Avg Train Loss")
-    plt.title("Training Loss (epoch-level)")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "train_loss_epoch.png"))
-    plt.close()
+    if len(train_loss_epoch) > 0:
+        plt.figure()
+        plt.plot(train_loss_epoch, marker="o")
+        plt.xlabel("Epoch")
+        plt.ylabel("Avg Train Loss")
+        plt.title("Training Loss (epoch-level)")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "train_loss_epoch.png"))
+        plt.close()
 
     # 3) val RMSE
-    plt.figure()
-    plt.plot(val_rmse_epoch, marker="o")
-    plt.xlabel("Epoch")
-    plt.ylabel("Val RMSE")
-    plt.title("Validation RMSE")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "val_rmse.png"))
-    plt.close()
+    if len(val_rmse_epoch) > 0:
+        plt.figure()
+        plt.plot(val_rmse_epoch, marker="o")
+        plt.xlabel("Eval index (not every epoch)")
+        plt.ylabel("Val RMSE")
+        plt.title("Validation RMSE (sparse eval)")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(out_dir, "val_rmse.png"))
+        plt.close()
 
-    # 4) MoE weights per epoch (mean over steps)
+    # 4) MoE weights per epoch (mean)
     if moe_w_epoch is not None and len(moe_w_epoch) > 0:
         moe_w_epoch = np.asarray(moe_w_epoch)  # (E,3)
         plt.figure()
@@ -129,13 +134,21 @@ def save_curves(out_dir, train_loss_step, train_loss_epoch, val_rmse_epoch, moe_
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, required=True, help="path to samples (.pt/.pkl/.npy), list[dict]")
+
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--lr", type=float, default=None)
+
     parser.add_argument("--gpu", type=int, default=0, help="gpu index to use (default 0)")
     parser.add_argument("--num_workers", type=int, default=None)
     parser.add_argument("--tiny", type=int, default=None, help="use only first N samples for smoke test")
     parser.add_argument("--plot_dir", type=str, default="plots", help="where to save curve plots")
+
+    parser.add_argument("--val_every", type=int, default=10, help="run validation every N epochs (default 5)")
+    parser.add_argument("--val_n_samples", type=int, default=2, help="diffusion samples for val during training (default 2)")
+    parser.add_argument("--final_n_samples", type=int, default=20, help="diffusion samples for final eval (default 20)")
+    parser.add_argument("--prefetch_factor", type=int, default=2, help="DataLoader prefetch_factor (workers>0 only)")
+    parser.add_argument("--save_plots_every", type=int, default=1, help="save plots every N epochs (default 1)")
     args = parser.parse_args()
 
     config = get_config()
@@ -145,17 +158,30 @@ def main():
         config["train"]["batch_size"] = args.batch_size
     if args.lr is not None:
         config["train"]["lr"] = args.lr
+
     if args.num_workers is not None:
         config["train"]["num_workers"] = args.num_workers
+    else:
+        if int(config["train"].get("num_workers", 0)) == 0:
+            config["train"]["num_workers"] = 4
 
-    # 指定 GPU
+    # device
     if torch.cuda.is_available():
         torch.cuda.set_device(args.gpu)
         device = torch.device(f"cuda:{args.gpu}")
     else:
         device = torch.device("cpu")
+    print(f"device: {device}")
 
     set_seed(config["train"]["seed"])
+
+    # ckpt path: ./model/<data_name>_csdi_moe.pt
+    data_base = os.path.basename(args.data)
+    data_name = os.path.splitext(data_base)[0]
+    ckpt_dir = "./model"
+    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_path = os.path.join(ckpt_dir, data_name + "_csdi_moe.pt")
+    print("Checkpoint will be saved to:", ckpt_path)
 
     samples = load_samples(args.data)
     if args.tiny is not None:
@@ -165,7 +191,7 @@ def main():
     n = len(samples)
     assert n >= 10, f"dataset too small: {n}"
 
-    # 80/10/10 split（小数据时保证 val 至少 1 条）
+    # 80/10/10 split
     n_train = int(n * 0.8)
     n_val = max(1, int(n * 0.1))
     n_train = max(1, n_train)
@@ -175,9 +201,7 @@ def main():
     train_samples = samples[:n_train]
     val_samples = samples[n_train:n_train + n_val]
     test_samples = samples[n_train + n_val:]
-
     print(f"split: train={len(train_samples)} val={len(val_samples)} test={len(test_samples)}")
-    print(f"device: {device}")
 
     ds_train = MultiModalImputationDataset(
         train_samples,
@@ -199,25 +223,29 @@ def main():
     )
 
     use_cuda = (device.type == "cuda")
+    num_workers = int(config["train"]["num_workers"])
+
     dl_train = DataLoader(
         ds_train,
         batch_size=config["train"]["batch_size"],
         shuffle=True,
-        num_workers=config["train"]["num_workers"],
+        num_workers=num_workers,
         collate_fn=collate_mm,
         drop_last=True,
         pin_memory=use_cuda,
-        persistent_workers=(config["train"]["num_workers"] > 0),
+        persistent_workers=(num_workers > 0),
+        prefetch_factor=(args.prefetch_factor if num_workers > 0 else None),
     )
     dl_val = DataLoader(
         ds_val,
         batch_size=config["train"]["batch_size"],
         shuffle=False,
-        num_workers=config["train"]["num_workers"],
+        num_workers=num_workers,
         collate_fn=collate_mm,
         drop_last=False,
         pin_memory=use_cuda,
-        persistent_workers=(config["train"]["num_workers"] > 0),
+        persistent_workers=(num_workers > 0),
+        prefetch_factor=(args.prefetch_factor if num_workers > 0 else None),
     )
 
     model = CSDI_MultiModal_MoE(config=config, device=device, target_dim=30).to(device)
@@ -231,7 +259,7 @@ def main():
     train_loss_step = []
     train_loss_epoch = []
     val_rmse_epoch = []
-    moe_w_epoch = []   # (E,3) epoch-mean
+    moe_w_epoch = []   # epoch mean (3,)
 
     best_val = float("inf")
     global_step = 0
@@ -240,71 +268,84 @@ def main():
         model.train()
 
         epoch_losses = []
-        epoch_moe_ws = []
+
+        # epoch-level moe weight sum (torch, avoid numpy overflow)
+        moe_sum = torch.zeros(3, device=device)
+        moe_cnt = 0
 
         pbar = tqdm(dl_train, desc=f"[train] epoch {epoch}/{config['train']['max_epochs']}", leave=True)
         for batch in pbar:
-            loss, moe_w = model(batch, is_train=1)
-
-            # record
-            loss_item = float(loss.item())
-            train_loss_step.append(loss_item)
-            epoch_losses.append(loss_item)
-
-            # moe_w: (B,3) -> mean over batch
-            w_mean = moe_w.mean(dim=0).detach().cpu().numpy()  # (3,)
-            epoch_moe_ws.append(w_mean)
-
             optim.zero_grad(set_to_none=True)
+
+            loss, moe_w = model(batch, is_train=1)
             loss.backward()
 
             if config["train"]["grad_clip"] is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), config["train"]["grad_clip"])
 
             optim.step()
-            global_step += 1
 
+            loss_item = float(loss.item())
+            train_loss_step.append(loss_item)
+            epoch_losses.append(loss_item)
+
+            # moe_w: (B,3) -> mean over batch, accumulate in torch
+            w_mean = moe_w.mean(dim=0).to(device)  # (3,)
+            if torch.isfinite(w_mean).all():
+                moe_sum += w_mean
+                moe_cnt += 1
+
+            w_cpu = w_mean.detach().float().cpu().numpy()
             pbar.set_postfix(
                 loss=f"{loss_item:.4f}",
-                w_text=f"{w_mean[0]:.2f}",
-                w_cxr=f"{w_mean[1]:.2f}",
-                w_ecg=f"{w_mean[2]:.2f}",
+                w_text=f"{w_cpu[0]:.2f}",
+                w_cxr=f"{w_cpu[1]:.2f}",
+                w_ecg=f"{w_cpu[2]:.2f}",
             )
+
+            global_step += 1
 
         avg_epoch_loss = float(np.mean(epoch_losses)) if len(epoch_losses) > 0 else float("nan")
         train_loss_epoch.append(avg_epoch_loss)
 
-        epoch_w = np.mean(np.stack(epoch_moe_ws, axis=0), axis=0) if len(epoch_moe_ws) > 0 else np.array([np.nan, np.nan, np.nan])
+        if moe_cnt > 0:
+            epoch_w = (moe_sum / moe_cnt).detach().float().cpu().numpy()
+        else:
+            epoch_w = np.array([np.nan, np.nan, np.nan], dtype=np.float32)
         moe_w_epoch.append(epoch_w)
 
-        val_rmse = eval_one_epoch(model, dl_val, device, n_samples=config["eval"]["n_samples"], desc="val")
-        val_rmse_epoch.append(float(val_rmse))
-        print(f"[epoch {epoch}] train_loss={avg_epoch_loss:.6f} val_RMSE={val_rmse:.6f}")
+        did_val = False
+        if (epoch % args.val_every) == 0 or epoch == 1:
+            did_val = True
+            val_rmse = eval_one_epoch(
+                model, dl_val, device,
+                n_samples=args.val_n_samples,
+                desc="val"
+            )
+            val_rmse_epoch.append(float(val_rmse))
+            print(f"[epoch {epoch}] train_loss={avg_epoch_loss:.6f} val_RMSE={val_rmse:.6f} (val_n_samples={args.val_n_samples})")
 
-        if val_rmse < best_val:
-            best_val = val_rmse
-            ckpt = {
-                "model": model.state_dict(),
-                "config": config,
-                "epoch": epoch,
-                "val_rmse": val_rmse,
-            }
+            if val_rmse < best_val:
+                best_val = val_rmse
+                ckpt = {
+                    "model": model.state_dict(),
+                    "config": config,
+                    "epoch": epoch,
+                    "val_rmse": val_rmse,
+                }
+                torch.save(ckpt, ckpt_path)
+                print(f"  saved best -> {ckpt_path}")
+        else:
+            print(f"[epoch {epoch}] train_loss={avg_epoch_loss:.6f} (skip val, val_every={args.val_every})")
 
-            # 自动构建 ckpt 保存路径
-            data_base = os.path.basename(args.data)         
-            data_name = os.path.splitext(data_base)[0]      
-
-            ckpt_dir = "./model"
-            os.makedirs(ckpt_dir, exist_ok=True)
-
-            ckpt_path = os.path.join(ckpt_dir, data_name + "_csdi_moe.pt")
-            torch.save(ckpt, ckpt_path)
-            print(f"  saved best -> {ckpt_path}")
-
-        save_curves(args.plot_dir, train_loss_step, train_loss_epoch, val_rmse_epoch, moe_w_epoch)
+        if (epoch % args.save_plots_every) == 0 or did_val:
+            save_curves(args.plot_dir, train_loss_step, train_loss_epoch, val_rmse_epoch, moe_w_epoch)
 
     print("training done. best_val_RMSE=", best_val)
     print(f"Saved plots to ./{args.plot_dir}/")
+
+    # final_rmse = eval_one_epoch(model, dl_val, device, n_samples=args.final_n_samples, desc="final_val")
+    # print(f"[final] val_RMSE={final_rmse:.6f} (final_n_samples={args.final_n_samples})")
 
 
 if __name__ == "__main__":
