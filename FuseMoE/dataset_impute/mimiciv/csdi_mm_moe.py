@@ -37,7 +37,7 @@ class ModalityMoEFuser(nn.Module):
         gate_in = torch.cat([text_ctx, cxr_ctx, ecg_ctx, miss], dim=-1)  # (B, ctx*3+3)
         logits = self.gate(gate_in)  # (B,3)
 
-        # ✅ 缺失模态：权重“直接为0”（用超大负数实现，softmax≈0，且数值稳定）
+        # 缺失模态：权重0
         logits = logits - 1e4 * miss
         w = F.softmax(logits, dim=-1)  # (B,3)
 
@@ -46,9 +46,6 @@ class ModalityMoEFuser(nn.Module):
 
 
 class CSDI_MultiModal_MoE(CSDI_base):
-    """
-    对 irg_ts (L,30) 插补，text/cxr/ecg 作为条件，通过 MoE 融合后注入 side_info。
-    """
     def __init__(self, config, device, target_dim: int = 30):
         self.device = device
         self.target_dim = target_dim
@@ -164,7 +161,6 @@ class CSDI_MultiModal_MoE(CSDI_base):
 
         samples = self.impute(observed_data, cond_mask, side_info, n_samples)  # (B, n_samples, K, L)
 
-        # ✅ 变长：把 padding 区域彻底屏蔽（不参与评估/指标）
         for i in range(len(seq_len)):
             L = int(seq_len[i].item())
             target_mask[i, :, L:] = 0

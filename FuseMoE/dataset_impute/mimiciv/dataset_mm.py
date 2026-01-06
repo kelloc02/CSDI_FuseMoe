@@ -69,7 +69,7 @@ class MultiModalImputationDataset(Dataset):
         observed_mask: (L,30) 0/1
         gt_mask: eval 用 cond_mask（从 observed 再扣一部分作为 target）
         """
-        # ✅ 保证是干净的 0/1
+        # 0/1
         observed_mask = sanitize_array(observed_mask, dtype=np.float32)
         observed_mask = (observed_mask > 0.5).astype(np.float32)
 

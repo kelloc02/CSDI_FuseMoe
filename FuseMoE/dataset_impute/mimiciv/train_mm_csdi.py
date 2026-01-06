@@ -14,7 +14,7 @@ from config_mm import get_config
 from dataset_mm import MultiModalImputationDataset, collate_mm
 from csdi_mm_moe import CSDI_MultiModal_MoE
 
-
+## 命令行：python train_mm_csdi.py   --data /playpen-shared/kechengli/workspace/dataset/mimiciv_pkl/test_ihm-48-cxr-notes-ecg_stays.pkl   --epochs 50   --batch_size 16   --gpu 0
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -23,12 +23,6 @@ def set_seed(seed: int):
 
 
 def load_samples(path: str):
-    """
-    支持：
-      - .pt / .pth: torch.load -> list[dict]
-      - .pkl: pickle.load -> list[dict]
-      - .npy: np.load(allow_pickle=True) -> list[dict]
-    """
     assert os.path.exists(path), f"not found: {path}"
     ext = os.path.splitext(path)[1].lower()
 
@@ -63,7 +57,6 @@ def eval_one_epoch(model, loader, device, n_samples=20, desc="val"):
             batch, n_samples=n_samples
         )
 
-        # 你要求用中位数
         pred = samples.median(dim=1).values  # (B,K,L)
 
         err = (pred - observed_data) ** 2
@@ -235,7 +228,6 @@ def main():
         weight_decay=config["train"]["weight_decay"],
     )
 
-    # ===== histories for plotting =====
     train_loss_step = []
     train_loss_epoch = []
     val_rmse_epoch = []
@@ -300,7 +292,6 @@ def main():
             torch.save(ckpt, config["train"]["save_path"])
             print(f"  saved best -> {config['train']['save_path']}")
 
-        # 每个 epoch 结束就保存一次曲线（防止中途断掉没图）
         save_curves(args.plot_dir, train_loss_step, train_loss_epoch, val_rmse_epoch, moe_w_epoch)
 
     print("training done. best_val_RMSE=", best_val)

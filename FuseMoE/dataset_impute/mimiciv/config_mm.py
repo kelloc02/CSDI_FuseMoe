@@ -1,13 +1,10 @@
 def get_config():
-    """
-    只要 main_model.py / diff_models.py 的 CSDI_base/diff_CSDI 接口不变，这个就能用。
-    """
     config = {
         "model": {
             "timeemb": 128,
             "featureemb": 64,
             "is_unconditional": False,
-            "target_strategy": "random",  # random|mix|pattern(若你原CSDI支持)
+            "target_strategy": "random", 
         },
         "diffusion": {
             "num_steps": 50,
@@ -23,13 +20,13 @@ def get_config():
             # side_dim 会在模型里自动设置，并额外+ctx_dim
         },
         "multimodal": {
-            "ctx_dim": 128,        # 融合条件向量维度 -> broadcast 到 (B,ctx,K,L) 拼进 side_info
+            "ctx_dim": 128,       
             "ctx_hidden": 256,     # MoE gate hidden
         },
         "data": {
             "text_dim": 768,
             "ecg_dim": 256,
-            "cxr_dim": 1024,       # ✅ 统一到 1024（适配你样本2）
+            "cxr_dim": 1024,   
             "eval_mask_ratio": 0.2 # val/test 时从观测里再扣掉一部分作为 target
         },
         "train": {
