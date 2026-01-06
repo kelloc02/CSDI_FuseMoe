@@ -144,6 +144,8 @@ def main():
     parser.add_argument("--tiny", type=int, default=None, help="use only first N samples for smoke test")
     parser.add_argument("--plot_dir", type=str, default="plots", help="where to save curve plots")
 
+# python train_mm_csdi.py   --data /playpen-shared/kechengli/workspace/dataset/mimiciv_pkl/train_ihm-48-cxr-notes-ecg-missingInd_stays.pkl   --epochs 50   --batch_size 16   --gpu 0
+# 下面的参数是为了训练时节省时间，val_n_samples可以比较小，因为sample很耗时间，val_every是每n个epoch做一次val
     parser.add_argument("--val_every", type=int, default=10, help="run validation every N epochs (default 5)")
     parser.add_argument("--val_n_samples", type=int, default=2, help="diffusion samples for val during training (default 2)")
     parser.add_argument("--final_n_samples", type=int, default=20, help="diffusion samples for final eval (default 20)")
