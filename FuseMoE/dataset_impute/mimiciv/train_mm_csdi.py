@@ -14,7 +14,7 @@ from config_mm import get_config
 from dataset_mm import MultiModalImputationDataset, collate_mm
 from csdi_mm_moe import CSDI_MultiModal_MoE
 
-## 命令行：python train_mm_csdi.py   --data /playpen-shared/kechengli/workspace/dataset/mimiciv_pkl/test_ihm-48-cxr-notes-ecg_stays.pkl   --epochs 50   --batch_size 16   --gpu 0
+## 命令行：python train_mm_csdi.py   --data /playpen-shared/kechengli/workspace/dataset/mimiciv_pkl/train_ihm-48-cxr-notes-ecg-missingInd_stays.pkl   --epochs 50   --batch_size 16   --gpu 0
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -289,8 +289,17 @@ def main():
                 "epoch": epoch,
                 "val_rmse": val_rmse,
             }
-            torch.save(ckpt, config["train"]["save_path"])
-            print(f"  saved best -> {config['train']['save_path']}")
+
+            # 自动构建 ckpt 保存路径
+            data_base = os.path.basename(args.data)         
+            data_name = os.path.splitext(data_base)[0]      
+
+            ckpt_dir = "./model"
+            os.makedirs(ckpt_dir, exist_ok=True)
+
+            ckpt_path = os.path.join(ckpt_dir, data_name + "_csdi_moe.pt")
+            torch.save(ckpt, ckpt_path)
+            print(f"  saved best -> {ckpt_path}")
 
         save_curves(args.plot_dir, train_loss_step, train_loss_epoch, val_rmse_epoch, moe_w_epoch)
 

@@ -38,7 +38,7 @@ def get_config():
             "grad_clip": 1.0,
             "num_workers": 2,
             "log_every": 50,
-            "save_path": "models/csdi_moe.pt",
+            # "save_path": "models/train_ihm-48-cxr-notes-ecg-missingInd_stays_csdi_moe.pt",
         },
         "eval": {
             "n_samples": 20,
